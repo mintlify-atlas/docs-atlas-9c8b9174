@@ -1,0 +1,123 @@
+---
+title: "Debugging probes"
+description: "Use the debug parameter and web UI to diagnose failed probes."
+---
+
+## Debugging workflow
+
+<Steps>
+  <Step title="Check probe_success">
+    Run a probe and look at the `probe_success` metric:
+
+    ```bash
+    curl "http://localhost:9115/probe?target=prometheus.io&module=http_2xx"
+    ```
+
+    A value of `0` means the probe failed. A value of `1` means it succeeded.
+  </Step>
+
+  <Step title="Add ?debug=true for detailed output">
+    Append `?debug=true` to any probe URL to get the full probe log and the metrics that would have been returned:
+
+    ```bash
+    curl "http://localhost:9115/probe?target=prometheus.io&module=http_2xx&debug=true"
+    ```
+
+    The response body has three sections:
+
+    ```
+    Logs for the probe:
+    <structured log lines from the prober>
+
+
+    Metrics that would have been returned:
+    <Prometheus text-format metrics>
+
+
+    Module configuration:
+    <YAML of the active module config>
+    ```
+
+    <Tip>
+      Use `--log.prober=debug` to get step-by-step detail in the probe logs section, including DNS resolution, each TCP connection attempt, TLS handshake, and response timings.
+    </Tip>
+  </Step>
+
+  <Step title="Inspect specific failure metrics">
+    With the metrics returned by `?debug=true`, look at protocol-specific gauges for more context:
+
+    | Metric | What to look for |
+    |--------|-----------------|
+    | `probe_success` | `0` = probe failed |
+    | `probe_http_status_code` | Unexpected HTTP status code |
+    | `probe_ssl_earliest_cert_expiry` | Unix timestamp of the soonest-expiring TLS certificate |
+    | `probe_duration_seconds` | Unusually long probe duration may indicate timeout |
+    | `blackbox_module_unknown_total` | Non-zero = requests for modules not defined in the config |
+  </Step>
+
+  <Step title="Use the web UI for recent probe history">
+    Open `http://localhost:9115` in a browser. The web UI shows a table of recent probes with their module, target, and success/failure status.
+
+    Each row links to the debug logs for that probe. The number of probes retained is controlled by `--history.limit` (default `100`).
+
+    <Note>
+      Failed probes that age out of the main history ring are preserved in a separate slice so that debug output for failures is always accessible, up to the same `--history.limit` count.
+    </Note>
+  </Step>
+</Steps>
+
+## HTTP endpoints reference
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/probe` | `GET` | Run a probe. Parameters: `target`, `module`, `debug`. |
+| `/logs` | `GET` | Retrieve stored debug output for a probe. |
+| `/config` | `GET` | View the currently loaded configuration as YAML. |
+| `/metrics` | `GET` | Exporter self-metrics, including `blackbox_module_unknown_total`. |
+| `/-/healthy` | `GET` | Health check. Returns `200 Healthy` when the exporter is running. |
+| `/-/reload` | `POST` | Trigger a configuration reload. |
+
+### /logs endpoint
+
+Retrieve the debug output captured for a specific probe by numeric ID or by target URL.
+
+**By probe ID:**
+
+```bash
+GET /logs?id=<id>
+```
+
+**By target (optionally filtered by module):**
+
+```bash
+GET /logs?target=<url>
+GET /logs?target=<url>&module=<module>
+```
+
+The `id` and `target` parameters are mutually exclusive. The `module` parameter is only valid when used with `target`.
+
+<Tip>
+  Probe IDs are shown in the web UI table on the "Logs" link for each row, and increment monotonically from `0` since the exporter started.
+</Tip>
+
+## Common failure patterns
+
+**`probe_success=0` with no obvious log output**
+
+Increase the prober log level to `debug` and re-run the probe:
+
+```bash
+./blackbox_exporter --config.file=blackbox.yml --log.prober=debug
+```
+
+**Unknown module**
+
+If `blackbox_module_unknown_total` is increasing, a scrape is requesting a module name that does not exist in the configuration. Check the `module` parameter in your Prometheus `params` config against the module names in `blackbox.yml`.
+
+**TLS certificate issues**
+
+Check `probe_ssl_earliest_cert_expiry`. The value is a Unix timestamp; if it is in the past or near future the certificate has expired or is about to expire.
+
+**HTTP status code mismatch**
+
+Check `probe_http_status_code`. If the value does not match the expected codes defined in the module's `valid_status_codes` list, the probe will fail even if the server responded.

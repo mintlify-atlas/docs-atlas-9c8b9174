@@ -1,0 +1,195 @@
+---
+title: "TCP prober"
+description: "Check TCP connectivity and validate query/response sequences with optional STARTTLS."
+---
+
+The TCP prober establishes a TCP connection to the target host and port. If no `query_response` steps are configured, a successful connection is sufficient for the probe to pass. When query/response steps are defined, the prober sends and receives data in sequence, optionally upgrading the connection to TLS mid-stream using STARTTLS.
+
+## Configuration
+
+<ParamField body="preferred_ip_protocol" type="string" default="ip6">
+  Preferred IP protocol for the connection: `ip4` or `ip6`.
+</ParamField>
+
+<ParamField body="ip_protocol_fallback" type="boolean" default="true">
+  Fall back to the other IP protocol if the preferred one is unavailable.
+</ParamField>
+
+<ParamField body="source_ip_address" type="string">
+  Source IP address to bind to when making the connection.
+</ParamField>
+
+<ParamField body="tls" type="boolean" default="false">
+  Connect with TLS from the start of the connection. Distinct from STARTTLS, which is negotiated mid-stream via a `query_response` step.
+</ParamField>
+
+<ParamField body="tls_config" type="object">
+  TLS configuration for the TCP connection. Used when `tls: true` or after a STARTTLS upgrade.
+
+  <Expandable title="fields">
+    <ParamField body="insecure_skip_verify" type="boolean" default="false">
+      Disable server certificate verification.
+    </ParamField>
+    <ParamField body="ca_file" type="string">
+      Path to a CA certificate file for server verification.
+    </ParamField>
+    <ParamField body="cert_file" type="string">
+      Path to a client certificate file for mutual TLS.
+    </ParamField>
+    <ParamField body="key_file" type="string">
+      Path to the client private key file for mutual TLS.
+    </ParamField>
+    <ParamField body="server_name" type="string">
+      Override the server name used for TLS certificate verification. Defaults to the target hostname.
+    </ParamField>
+    <ParamField body="min_version" type="string">
+      Minimum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+    </ParamField>
+    <ParamField body="max_version" type="string">
+      Maximum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="query_response" type="object[]">
+  Ordered list of send/expect steps to execute after connecting. Steps are executed in sequence. The probe fails if any step does not match.
+
+  <Expandable title="fields">
+    <ParamField body="expect" type="string">
+      Regular expression to match against data received from the server. Mutually exclusive with `expect_bytes`. Capture groups can be referenced in a subsequent `send` using `${1}`, `${2}`, etc.
+    </ParamField>
+    <ParamField body="expect_bytes" type="string">
+      Exact byte sequence to match against data received from the server. Accepts a base64-encoded binary string or a printable ASCII character. Mutually exclusive with `expect`. Use for binary protocols.
+    </ParamField>
+    <ParamField body="send" type="string">
+      Data to send to the server. Can reference capture groups from a preceding `expect` step using `${1}`, `${2}`, etc.
+    </ParamField>
+    <ParamField body="starttls" type="boolean" default="false">
+      Upgrade the plain TCP connection to TLS at this point in the sequence. The `tls_config` at the module level applies to this handshake.
+    </ParamField>
+    <ParamField body="labels" type="object[]">
+      Labels to export on the `probe_expect_info` metric for this step.
+
+      <Expandable title="fields">
+        <ParamField body="name" type="string">Label name.</ParamField>
+        <ParamField body="value" type="string">Label value. Can reference capture groups from `expect` using `${1}`, etc.</ParamField>
+      </Expandable>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## STARTTLS
+
+STARTTLS allows a plain TCP connection to be upgraded to TLS mid-stream, after initial protocol negotiation. Set `starttls: true` in a `query_response` step at the point in the exchange where the upgrade should occur. The `tls_config` block at the module level applies to the resulting TLS handshake.
+
+This pattern is used by protocols such as IMAP, SMTP, and PostgreSQL.
+
+## Binary protocols
+
+For protocols that use binary framing, use `expect_bytes` instead of `expect` to perform an exact byte-level comparison. Values can be specified as base64-encoded binary (`!!binary` in YAML) or as single printable ASCII characters.
+
+<Note>`expect` and `expect_bytes` are mutually exclusive within a single step.</Note>
+
+## Examples
+
+<CodeGroup>
+
+```yaml tls_connect
+modules:
+  tls_connect:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      tls: true
+```
+
+```yaml imap_starttls
+modules:
+  imap_starttls:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      query_response:
+        - expect: "OK.*STARTTLS"
+        - send: ". STARTTLS"
+        - expect: "OK"
+        - starttls: true
+        - send: ". capability"
+        - expect: "CAPABILITY IMAP4rev1"
+```
+
+```yaml smtp_starttls
+modules:
+  smtp_starttls:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      query_response:
+        - expect: "^220 ([^ ]+) ESMTP (.+)$"
+        - send: "EHLO prober\r"
+        - expect: "^250-STARTTLS"
+        - send: "STARTTLS\r"
+        - expect: "^220"
+        - starttls: true
+        - send: "EHLO prober\r"
+        - expect: "^250-AUTH"
+        - send: "QUIT\r"
+```
+
+```yaml irc_banner_example
+modules:
+  irc_banner_example:
+    prober: tcp
+    timeout: 5s
+    tcp:
+      query_response:
+        - send: "NICK prober"
+        - send: "USER prober prober prober :prober"
+        - expect: "PING :([^ ]+)"
+          send: "PONG ${1}"
+        - expect: "^:[^ ]+ 001"
+```
+
+```yaml rabbitmq
+modules:
+  rabbitmq:
+    prober: tcp
+    timeout: 30s
+    tcp:
+      query_response:
+        - send: "HELO\r"
+        - send: "\r"
+        - send: "\r"
+        - send: "\r"
+        - expect: "AMQP"
+      tls: true
+      tls_config:
+        insecure_skip_verify: false
+        ca_file: "/etc/blackbox_exporter/CA_cert.crt"
+```
+
+```yaml postgresql
+modules:
+  postgresql:
+    prober: tcp
+    tcp:
+      query_response:
+        - send: !!binary AAAACATSFi8=  # PostgreSQL SSLRequest packet
+        - expect_bytes: S              # 'S' = SSL supported, 'N' = not supported
+        - starttls: true
+```
+
+</CodeGroup>
+
+## Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `probe_success` | `1` if the probe succeeded, `0` otherwise |
+| `probe_duration_seconds` | Total time taken by the probe |
+| `probe_expect_info` | Carries labels defined in `query_response` steps |
+| `probe_ssl_earliest_cert_expiry` | Earliest TLS certificate expiry in Unix seconds (TLS connections only) |
+| `probe_ssl_last_chain_expiry_timestamp_seconds` | Latest certificate expiry in the TLS chain (TLS connections only) |
+| `probe_ssl_last_chain_info` | TLS leaf certificate metadata: fingerprint, subject, issuer, SANs, serial number (TLS connections only) |
+| `probe_tls_version_info{version}` | TLS version in use (TLS connections only) |
+| `probe_tls_cipher_info{cipher}` | TLS cipher suite negotiated during the handshake (TLS connections only) |

@@ -1,0 +1,108 @@
+---
+title: "gRPC prober"
+description: "Check gRPC service health using the standard gRPC Health Checking Protocol."
+---
+
+The gRPC prober checks the health of a gRPC service using the [gRPC Health Checking Protocol](https://github.com/grpc/grpc/blob/master/doc/health-checking.md). It connects to the target, calls the `Check` RPC on the `grpc.health.v1.Health` service, and reports the serving status returned by the server.
+
+Both TLS and plaintext (insecure) connections are supported.
+
+## Configuration
+
+<ParamField body="service" type="string">
+  The gRPC service name to pass in the `HealthCheckRequest`. When empty, the overall server health is queried. Corresponds to the `service` field in the gRPC Health Checking Protocol.
+</ParamField>
+
+<ParamField body="preferred_ip_protocol" type="string" default="ip6">
+  Preferred IP protocol for the connection: `ip4` or `ip6`.
+</ParamField>
+
+<ParamField body="ip_protocol_fallback" type="boolean" default="true">
+  Fall back to the other IP protocol if the preferred one is unavailable.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  gRPC client metadata (headers) to include in the health check request. Specified as a map of key to list of string values.
+
+  ```yaml
+  metadata:
+    authorization:
+      - "Bearer my-token"
+    x-request-id:
+      - "probe-001"
+  ```
+</ParamField>
+
+<ParamField body="tls" type="boolean" default="false">
+  Connect using TLS. When `false`, an insecure (plaintext) connection is used. Defaults to port 443 when TLS is enabled, port 80 otherwise (if no port is specified in the target).
+</ParamField>
+
+<ParamField body="tls_config" type="object">
+  TLS configuration for the gRPC connection. Only used when `tls: true`.
+
+  <Expandable title="fields">
+    <ParamField body="insecure_skip_verify" type="boolean" default="false">
+      Disable server certificate verification.
+    </ParamField>
+    <ParamField body="ca_file" type="string">
+      Path to a CA certificate file for server verification.
+    </ParamField>
+    <ParamField body="cert_file" type="string">
+      Path to a client certificate file for mutual TLS.
+    </ParamField>
+    <ParamField body="key_file" type="string">
+      Path to the client private key file for mutual TLS.
+    </ParamField>
+    <ParamField body="server_name" type="string">
+      Override the server name used for TLS certificate verification. Defaults to the target hostname.
+    </ParamField>
+    <ParamField body="min_version" type="string">
+      Minimum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+    </ParamField>
+    <ParamField body="max_version" type="string">
+      Maximum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## TLS vs plaintext
+
+<Note>
+When `tls: false`, the connection is made without any transport security. Use `tls: true` for production services. When `tls: true` and no port is specified in the target, the prober defaults to port 443.
+</Note>
+
+## Examples
+
+<CodeGroup>
+
+```yaml grpc (TLS)
+modules:
+  grpc:
+    prober: grpc
+    grpc:
+      tls: true
+      preferred_ip_protocol: "ip4"
+```
+
+```yaml grpc_plain (plaintext with named service)
+modules:
+  grpc_plain:
+    prober: grpc
+    grpc:
+      tls: false
+      service: "service1"
+```
+
+</CodeGroup>
+
+## Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `probe_grpc_duration_seconds{phase}` | Duration of the gRPC probe by phase: `resolve`, `check` |
+| `probe_grpc_healthcheck_response{serving_status}` | Health check response status. The label value is one of `SERVING`, `NOT_SERVING`, `UNKNOWN`, or `SERVICE_UNKNOWN`. Set to `1` for the received status, `0` for all others. |
+| `probe_grpc_status_code` | gRPC status code returned by the health check call |
+| `probe_grpc_ssl` | `1` if TLS was used for the connection, `0` otherwise |
+| `probe_ssl_earliest_cert_expiry` | Earliest TLS certificate expiry in Unix seconds (TLS connections only) |
+| `probe_ssl_last_chain_info` | TLS leaf certificate metadata: fingerprint, subject, issuer, SANs, serial number |
+| `probe_tls_version_info{version}` | TLS version in use (TLS connections only) |

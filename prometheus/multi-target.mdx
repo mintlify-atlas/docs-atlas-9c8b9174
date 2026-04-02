@@ -1,0 +1,174 @@
+---
+title: 'Multi-target exporter pattern'
+description: 'Understand how the Blackbox Exporter implements the Prometheus multi-target pattern.'
+keywords: ['prometheus', 'multi-target', 'blackbox exporter', 'relabeling', 'service discovery', 'pattern']
+---
+
+The Blackbox Exporter does not follow the same model as exporters like `node_exporter`, where one exporter process runs on each monitored host and exposes metrics about that host. Instead, a single Blackbox Exporter instance can probe any number of remote targets. Prometheus tells the exporter which target to probe on each scrape by passing it as a URL parameter.
+
+<Note>
+This pattern is described in detail in the Prometheus guide [Understanding and using the multi-target exporter pattern](https://prometheus.io/docs/guides/multi-target-exporter/).
+</Note>
+
+## How it works
+
+The exporter's probe endpoint is `/probe`. When Prometheus scrapes it, the exporter runs one probe and returns the metrics for that probe execution.
+
+```
+/probe?target=<url>&module=<module>[&debug=true]
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `target` | Yes | The address or URL to probe. |
+| `module` | No | The module name from `blackbox.yml`. Defaults to `http_2xx`. |
+| `debug` | No | If `true`, returns human-readable probe logs and metrics instead of the Prometheus text format. |
+
+For example, probing `prometheus.io` with the `http_2xx` module:
+
+```bash
+curl "http://localhost:9115/probe?target=prometheus.io&module=http_2xx"
+```
+
+## Contrast with the node_exporter pattern
+
+| | node_exporter | Blackbox Exporter |
+|-|---------------|-------------------|
+| Deployment | One per monitored host | One shared instance |
+| Target identity | Fixed (the host it runs on) | Passed as a parameter per scrape |
+| Prometheus config | Scrapes the exporter directly | Uses relabeling to route through the exporter |
+| Metrics | About the local system | About a remote endpoint |
+
+## Prometheus relabeling enables this pattern
+
+Prometheus has no native concept of "probe this target via a third party." Relabeling bridges the gap by rewriting the scrape target address to the exporter before the scrape happens, while preserving the original target address as a parameter and as the `instance` label.
+
+See [Prometheus scrape configuration](/prometheus/scrape-config) for the full relabeling breakdown.
+
+## Multiple static targets
+
+A single job can probe many targets. Group targets by protocol type to keep module configuration consistent:
+
+```yaml
+scrape_configs:
+  # HTTP/HTTPS targets
+  - job_name: 'blackbox_http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://prometheus.io
+          - https://prometheus.io
+          - http://example.com:8080
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
+  # TCP targets
+  - job_name: 'blackbox_tcp'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - prometheus.io:443
+          - example.com:25
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+```
+
+<Tip>
+Use separate Prometheus jobs for different protocol types. This keeps module configuration clean and makes it easier to set different scrape intervals or alert rules per protocol.
+</Tip>
+
+## Using file_sd_configs
+
+File-based service discovery lets you add and remove targets without reloading Prometheus. The relabeling setup is the same:
+
+```yaml
+scrape_configs:
+  - job_name: 'blackbox_file_sd'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/blackbox_targets.yml
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+```
+
+The targets file uses the standard Prometheus file SD format:
+
+```yaml
+- targets:
+    - https://example.com
+    - https://api.example.com/health
+  labels:
+    env: production
+```
+
+## Using dns_sd_configs
+
+DNS service discovery resolves hostnames to IP addresses and creates one target per resolved address. Because the resolved `__address__` is an IP, use `__param_hostname` to pass the original hostname to the exporter for the `Host` header and TLS SNI:
+
+```yaml
+scrape_configs:
+  - job_name: 'blackbox_dns_sd'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    dns_sd_configs:
+      - names:
+          - example.com
+          - prometheus.io
+        type: A
+        port: 443
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+        replacement: https://$1/
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+      - source_labels: [__meta_dns_name]
+        target_label: __param_hostname
+      - source_labels: [__meta_dns_name]
+        target_label: vhost
+```
+
+## Instance label conventions
+
+By convention, the `instance` label on probe metrics should identify what is being probed, not the exporter that ran the probe. The relabeling pattern achieves this by copying the target URL into `instance` before overwriting `__address__` with the exporter's address.
+
+This means your `instance` values will look like `http://prometheus.io` or `prometheus.io:443`, which makes it straightforward to build dashboards and alerts based on the probed endpoint.
+
+## Exporter self-metrics
+
+The `/probe` endpoint only returns metrics for the probe that was just run. The exporter's own operational metrics—build information, unknown module counters, and Go runtime stats—are at `/metrics`.
+
+<Note>
+Always configure a separate Prometheus job to scrape `/metrics`. If you only scrape `/probe`, you will have no visibility into the exporter's own health.
+</Note>
+
+```yaml
+- job_name: 'blackbox_exporter'
+  static_configs:
+    - targets: ['127.0.0.1:9115']
+```

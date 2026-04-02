@@ -1,0 +1,119 @@
+---
+title: "Configuration overview"
+description: "Understand the blackbox.yml configuration file structure and CLI flags."
+---
+
+The Blackbox Exporter is configured through a YAML file (default: `blackbox.yml`) and a set of CLI flags. The config file defines named modules — reusable probe configurations — that Prometheus references when it scrapes `/probe`.
+
+## Config file structure
+
+The top-level key in `blackbox.yml` is `modules`, a map of module names to module definitions:
+
+```yaml blackbox.yml
+modules:
+  <module_name>:
+    prober: <http|tcp|dns|icmp|grpc|unix|websocket>
+    timeout: <duration>
+    http: {}   # prober-specific config block
+```
+
+Only one prober-specific block (`http`, `tcp`, `dns`, `icmp`, `grpc`, `unix`, or `websocket`) should be set per module.
+
+<Note>
+  The config file is strict — unknown fields cause a parse error. This prevents silently ignored typos.
+</Note>
+
+See [Modules](/configuration/modules) for the full list of per-module fields and built-in examples.
+
+## CLI flags
+
+<ParamField path="--config.file" type="string" default="blackbox.yml">
+  Path to the configuration file.
+</ParamField>
+
+<ParamField path="--timeout-offset" type="float" default="0.5">
+  Seconds subtracted from the Prometheus `scrape_timeout` to compute the effective probe deadline. Prevents the probe from running right up to Prometheus's hard timeout.
+</ParamField>
+
+<ParamField path="--log.level" type="string" default="info">
+  Log verbosity for the exporter process. One of: `debug`, `info`, `warn`, `error`.
+</ParamField>
+
+<ParamField path="--log.prober" type="string" default="info">
+  Log level for individual probe request logs. One of: `debug`, `info`, `warn`, `error`. Setting this to `debug` is equivalent to adding `debug=true` to every probe request.
+</ParamField>
+
+<ParamField path="--history.limit" type="integer" default="100">
+  Maximum number of recent probe results to keep in memory for the web UI history view.
+</ParamField>
+
+<ParamField path="--web.external-url" type="string">
+  The URL under which the exporter is externally reachable (e.g., behind a reverse proxy). Used to generate correct links in the web UI. If the URL has a path portion, it prefixes all HTTP endpoints.
+</ParamField>
+
+<ParamField path="--web.config.file" type="string">
+  Path to a web configuration file for enabling TLS and basic authentication on the exporter's HTTP endpoints. See [TLS and authentication](/configuration/tls-auth).
+</ParamField>
+
+## Config validation
+
+Use `--config.check` to validate the config file and exit without starting the server:
+
+```bash
+./blackbox_exporter --config.file=blackbox.yml --config.check
+```
+
+If the file is valid, the process exits with code `0`. If there are errors, it exits with code `1` and prints the error.
+
+<Tip>
+  Run config validation in CI before deploying a new `blackbox.yml`.
+</Tip>
+
+## Hot reload
+
+You can reload the configuration without restarting the exporter using either method:
+
+<Tabs>
+  <Tab title="SIGHUP">
+    ```bash
+    kill -HUP <pid>
+    ```
+  </Tab>
+  <Tab title="HTTP POST">
+    ```bash
+    curl -X POST http://localhost:9115/-/reload
+    ```
+  </Tab>
+</Tabs>
+
+The exporter computes a checksum of the config file on each reload attempt. If the file has not changed since the last successful load, the reload is skipped silently.
+
+## Auto-reload
+
+<ParamField path="--config.enable-auto-reload" type="boolean" default="false">
+  When enabled, the exporter polls the config file on a fixed interval and reloads it automatically when a change is detected.
+</ParamField>
+
+<ParamField path="--config.auto-reload-interval" type="integer" default="30">
+  Interval in seconds between config file checksum checks when `--config.enable-auto-reload` is set.
+</ParamField>
+
+```bash
+./blackbox_exporter \
+  --config.file=blackbox.yml \
+  --config.enable-auto-reload \
+  --config.auto-reload-interval=60
+```
+
+<Warning>
+  Auto-reload uses a checksum comparison, not filesystem events. Changes are detected only after the next polling interval elapses.
+</Warning>
+
+## Reload metrics
+
+Two metrics track the config reload state:
+
+| Metric | Description |
+|---|---|
+| `blackbox_exporter_config_last_reload_successful` | `1` if the last reload succeeded, `0` if it failed |
+| `blackbox_exporter_config_last_reload_success_timestamp_seconds` | Unix timestamp of the last successful reload |

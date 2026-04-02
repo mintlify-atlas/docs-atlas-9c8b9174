@@ -1,0 +1,206 @@
+---
+title: "DNS prober"
+description: "Validate DNS queries including response codes, record types, and answer record content."
+---
+
+The DNS prober sends a DNS query to the target server and validates the response. It supports UDP and TCP transport, DNS-over-TLS (DoT), and validation of answer, authority, and additional resource record sections using regular expressions.
+
+The default transport is UDP on port 53. DNS-over-TLS requires TCP and uses port 853 by default.
+
+## Configuration
+
+<ParamField body="query_name" type="string" required>
+  The DNS name to query (e.g., `www.prometheus.io`).
+</ParamField>
+
+<ParamField body="query_type" type="string" default="ANY">
+  DNS record type to query. Common values: `A`, `AAAA`, `CNAME`, `MX`, `NS`, `PTR`, `SOA`, `TXT`. Any type string recognized by the DNS library is accepted.
+</ParamField>
+
+<ParamField body="query_class" type="string" default="IN">
+  DNS class for the query. Almost always `IN` (Internet).
+</ParamField>
+
+<ParamField body="transport_protocol" type="string" default="udp">
+  Transport protocol for the DNS query: `udp` or `tcp`. DNS-over-TLS requires `tcp`.
+</ParamField>
+
+<ParamField body="dns_over_tls" type="boolean" default="false">
+  Use DNS-over-TLS (DoT). Requires `transport_protocol: tcp`. Connects to port 853 by default.
+</ParamField>
+
+<ParamField body="tls_config" type="object">
+  TLS configuration for DNS-over-TLS connections.
+
+  <Expandable title="fields">
+    <ParamField body="insecure_skip_verify" type="boolean" default="false">
+      Disable server certificate verification.
+    </ParamField>
+    <ParamField body="ca_file" type="string">
+      Path to a CA certificate file.
+    </ParamField>
+    <ParamField body="cert_file" type="string">
+      Path to a client certificate file for mutual TLS.
+    </ParamField>
+    <ParamField body="key_file" type="string">
+      Path to the client private key file.
+    </ParamField>
+    <ParamField body="server_name" type="string">
+      Override the server name for TLS certificate verification. Defaults to the target hostname.
+    </ParamField>
+    <ParamField body="min_version" type="string">
+      Minimum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+    </ParamField>
+    <ParamField body="max_version" type="string">
+      Maximum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="recursion_desired" type="boolean" default="true">
+  Set the Recursion Desired (RD) flag in the DNS query.
+</ParamField>
+
+<ParamField body="valid_rcodes" type="string[]" default="[NOERROR]">
+  List of DNS response codes considered successful. For example: `["NOERROR", "NXDOMAIN"]`.
+</ParamField>
+
+<ParamField body="preferred_ip_protocol" type="string" default="ip6">
+  Preferred IP protocol for connecting to the DNS server: `ip4` or `ip6`.
+</ParamField>
+
+<ParamField body="ip_protocol_fallback" type="boolean" default="true">
+  Fall back to the other IP protocol if the preferred one is unavailable.
+</ParamField>
+
+<ParamField body="source_ip_address" type="string">
+  Source IP address to bind to when sending the DNS query.
+</ParamField>
+
+### Record validation
+
+Each of `validate_answer_rrs`, `validate_authority_rrs`, and `validate_additional_rrs` applies regular expression checks against the resource records in the corresponding DNS response section. All checks within a block must pass for the probe to succeed.
+
+<AccordionGroup>
+  <Accordion title="validate_answer_rrs">
+    Validates records in the answer section of the DNS response.
+
+    <ParamField body="fail_if_matches_regexp" type="string[]">
+      Probe fails if **any** RR matches any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_all_match_regexp" type="string[]">
+      Probe fails if **all** RRs match any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_not_matches_regexp" type="string[]">
+      Probe fails if **any** RR does not match any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_none_matches_regexp" type="string[]">
+      Probe fails if **none** of the RRs match any of these regular expressions.
+    </ParamField>
+  </Accordion>
+
+  <Accordion title="validate_authority_rrs">
+    Validates records in the authority section of the DNS response.
+
+    <ParamField body="fail_if_matches_regexp" type="string[]">
+      Probe fails if **any** RR matches any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_all_match_regexp" type="string[]">
+      Probe fails if **all** RRs match any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_not_matches_regexp" type="string[]">
+      Probe fails if **any** RR does not match any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_none_matches_regexp" type="string[]">
+      Probe fails if **none** of the RRs match any of these regular expressions.
+    </ParamField>
+  </Accordion>
+
+  <Accordion title="validate_additional_rrs">
+    Validates records in the additional section of the DNS response.
+
+    <ParamField body="fail_if_matches_regexp" type="string[]">
+      Probe fails if **any** RR matches any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_all_match_regexp" type="string[]">
+      Probe fails if **all** RRs match any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_not_matches_regexp" type="string[]">
+      Probe fails if **any** RR does not match any of these regular expressions.
+    </ParamField>
+    <ParamField body="fail_if_none_matches_regexp" type="string[]">
+      Probe fails if **none** of the RRs match any of these regular expressions.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+## Address selection
+
+The DNS prober resolves the target server address (not the query name) using the configured `preferred_ip_protocol`. Only a single address is selected per probe attempt:
+
+- If `ip_protocol_fallback` is `true` (default), the prober can connect over either IPv4 or IPv6, preferring `preferred_ip_protocol` when both are available.
+- If `ip_protocol_fallback` is `false`, only the specified protocol is used. The probe fails if no address of that family is available.
+- When multiple addresses exist in the selected family, only the first one found is used.
+
+## Examples
+
+<CodeGroup>
+
+```yaml dns_udp_example
+modules:
+  dns_udp_example:
+    prober: dns
+    timeout: 5s
+    dns:
+      query_name: "www.prometheus.io"
+      query_type: "A"
+      valid_rcodes:
+        - NOERROR
+      validate_answer_rrs:
+        fail_if_matches_regexp:
+          - ".*127.0.0.1"
+        fail_if_all_match_regexp:
+          - ".*127.0.0.1"
+        fail_if_not_matches_regexp:
+          - "www.prometheus.io.\t300\tIN\tA\t127.0.0.1"
+        fail_if_none_matches_regexp:
+          - "127.0.0.1"
+      validate_authority_rrs:
+        fail_if_matches_regexp:
+          - ".*127.0.0.1"
+      validate_additional_rrs:
+        fail_if_matches_regexp:
+          - ".*127.0.0.1"
+```
+
+```yaml dns_soa
+modules:
+  dns_soa:
+    prober: dns
+    dns:
+      query_name: "prometheus.io"
+      query_type: "SOA"
+```
+
+```yaml dns_tcp_example
+modules:
+  dns_tcp_example:
+    prober: dns
+    dns:
+      transport_protocol: "tcp"
+      preferred_ip_protocol: "ip4"
+      query_name: "www.prometheus.io"
+```
+
+</CodeGroup>
+
+## Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `probe_dns_duration_seconds{phase}` | Duration of the DNS request by phase: `resolve`, `connect`, `request` |
+| `probe_dns_query_succeeded` | `1` if the DNS query was sent and a response was received |
+| `probe_dns_answer_rrs` | Number of resource records in the answer section |
+| `probe_dns_authority_rrs` | Number of resource records in the authority section |
+| `probe_dns_additional_rrs` | Number of resource records in the additional section |
+| `probe_dns_serial` | SOA serial number (only emitted for `SOA` queries) |

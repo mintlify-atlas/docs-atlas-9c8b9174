@@ -1,0 +1,149 @@
+---
+title: 'Metrics reference'
+description: 'All Prometheus metrics emitted by the Blackbox Exporter for each probe type.'
+keywords: ['prometheus', 'metrics', 'blackbox exporter', 'probe', 'http', 'dns', 'tcp', 'icmp', 'grpc']
+---
+
+Every request to `/probe` returns a set of metrics for that probe execution. The metrics available depend on which prober (`http`, `tcp`, `dns`, `icmp`, or `grpc`) the selected module uses.
+
+`probe_success` is the primary signal: a value of `1` means the probe passed all configured checks, and `0` means it failed. All other metrics provide detail about what happened during the probe.
+
+<AccordionGroup>
+
+  <Accordion title="Common metrics (all probers)">
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `probe_success` | Gauge | `1` if the probe succeeded, `0` if it failed. |
+| `probe_duration_seconds` | Gauge | Total time the probe took to complete, in seconds. |
+
+These two metrics are present on every probe response regardless of prober type.
+
+  </Accordion>
+
+  <Accordion title="HTTP prober">
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `probe_http_status_code` | Gauge | | HTTP response status code. |
+| `probe_http_content_length` | Gauge | | Value of the `Content-Length` response header. `-1` if not set. |
+| `probe_http_uncompressed_body_length` | Gauge | | Number of bytes read from the response body after decompression. |
+| `probe_http_duration_seconds` | Gauge | `phase` | Duration of the HTTP request broken down by phase, summed across all redirects. |
+| `probe_http_redirects` | Gauge | | Number of redirects followed. |
+| `probe_http_ssl` | Gauge | | `1` if the final request used SSL/TLS, `0` otherwise. |
+| `probe_http_version` | Gauge | | Numeric HTTP version of the response (for example, `1.1`, `2`). |
+| `probe_http_last_modified_timestamp_seconds` | Gauge | | Value of the `Last-Modified` response header as a Unix timestamp. Only present if the header is set. |
+| `probe_ssl_earliest_cert_expiry` | Gauge | | Earliest expiry time among all SSL certificates in the chain, as a Unix timestamp. |
+| `probe_ssl_last_chain_expiry_timestamp_seconds` | Gauge | | Latest expiry time among all SSL certificates in the chain, as a Unix timestamp. |
+| `probe_tls_version_info` | Gauge | `version` | Always `1`. The `version` label contains the negotiated TLS version string (for example, `TLS 1.3`). |
+| `probe_tls_cipher_info` | Gauge | `cipher` | Always `1`. The `cipher` label contains the negotiated cipher suite name. |
+| `probe_failed_due_to_regex` | Gauge | | `1` if the probe failed because a body or header regex check did not match. |
+| `probe_failed_due_to_cel` | Gauge | | `1` if the probe failed because a CEL expression check did not match. Only present when CEL checks are configured. |
+
+**`probe_http_duration_seconds` phases**
+
+The `phase` label takes one of the following values:
+
+| Phase | Description |
+|-------|-------------|
+| `resolve` | DNS resolution time. |
+| `connect` | TCP connection establishment time. |
+| `tls` | TLS handshake time. Only non-zero for HTTPS requests. |
+| `processing` | Time from connection established to first response byte. |
+| `transfer` | Time to read the full response body. |
+
+  </Accordion>
+
+  <Accordion title="DNS prober">
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `probe_dns_duration_seconds` | Gauge | `phase` | Duration of the DNS request broken down by phase. |
+| `probe_dns_query_succeeded` | Gauge | | `1` if the DNS query was executed without a transport error. |
+| `probe_dns_answer_rrs` | Gauge | | Number of resource records in the answer section. |
+| `probe_dns_authority_rrs` | Gauge | | Number of resource records in the authority section. |
+| `probe_dns_additional_rrs` | Gauge | | Number of resource records in the additional section. |
+| `probe_dns_serial` | Gauge | | SOA serial number. Only present when the query type is `SOA`. |
+
+**`probe_dns_duration_seconds` phases**
+
+| Phase | Description |
+|-------|-------------|
+| `resolve` | Time to resolve the DNS server's own address. |
+| `connect` | Time to establish the connection to the DNS server. |
+| `request` | Round-trip time for the DNS query itself. |
+
+<Note>
+`probe_dns_query_succeeded` being `1` does not mean the probe succeeded. The probe also validates response codes and record contents according to the module configuration.
+</Note>
+
+  </Accordion>
+
+  <Accordion title="TCP prober">
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `probe_failed_due_to_regex` | Gauge | | `1` if the probe failed because a query/response regex did not match. |
+| `probe_failed_due_to_bytes` | Gauge | | `1` if the probe failed because a byte sequence did not match. |
+| `probe_expect_info` | Gauge | dynamic | Present when a `query_response` entry uses `labels`. Label names and values are populated from regex capture groups in the matched response. Always `1` when present. |
+| `probe_ssl_earliest_cert_expiry` | Gauge | | Earliest certificate expiry in the TLS chain (Unix timestamp). Only present when TLS is used. |
+| `probe_ssl_last_chain_expiry_timestamp_seconds` | Gauge | | Latest certificate expiry in the TLS chain (Unix timestamp). Only present when TLS is used. |
+| `probe_tls_version_info` | Gauge | `version` | Negotiated TLS version. Only present when TLS is used. |
+
+  </Accordion>
+
+  <Accordion title="ICMP prober">
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `probe_icmp_duration_seconds` | Gauge | `phase` | Duration of the ICMP probe broken down by phase. |
+| `probe_icmp_reply_hop_limit` | Gauge | | Hop limit (TTL for IPv4) from the ICMP reply packet. Only present when the value can be read from the socket control message. |
+
+**`probe_icmp_duration_seconds` phases**
+
+| Phase | Description |
+|-------|-------------|
+| `resolve` | DNS resolution time for the target address. |
+| `setup` | Time to create and configure the socket. |
+| `rtt` | Round-trip time from sending the echo request to receiving the echo reply. |
+
+  </Accordion>
+
+  <Accordion title="gRPC prober">
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `probe_grpc_duration_seconds` | Gauge | `phase` | Duration of the gRPC health check broken down by phase. |
+| `probe_grpc_status_code` | Gauge | | Numeric gRPC status code returned by the health check RPC. |
+| `probe_grpc_healthcheck_response` | Gauge | `serving_status` | One gauge per possible `ServingStatus` value. The gauge is `1` for the status returned by the server, `0` for all others. |
+| `probe_grpc_ssl` | Gauge | | `1` if the connection used TLS, `0` otherwise. |
+| `probe_ssl_earliest_cert_expiry` | Gauge | | Earliest certificate expiry in the TLS chain (Unix timestamp). Only present when TLS is used. |
+| `probe_tls_version_info` | Gauge | `version` | Negotiated TLS version. Only present when TLS is used. |
+
+**`probe_grpc_duration_seconds` phases**
+
+| Phase | Description |
+|-------|-------------|
+| `resolve` | DNS resolution time for the target address. |
+| `check` | Time to complete the gRPC health check RPC call. |
+
+**`probe_grpc_healthcheck_response` serving status values**
+
+The `serving_status` label will be one of `SERVING`, `NOT_SERVING`, `UNKNOWN`, or `SERVICE_UNKNOWN`, matching the gRPC Health Checking Protocol.
+
+  </Accordion>
+
+  <Accordion title="Exporter self-metrics">
+
+These metrics are available at `/metrics` and describe the operation of the exporter itself, not any probe results.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `blackbox_module_unknown_total` | Counter | Number of probe requests that referenced a module name not found in the configuration. |
+| `blackbox_exporter_build_info` | Gauge | Always `1`. Labels carry version, branch, revision, Go version, and build date. |
+
+Scrape `/metrics` with a separate Prometheus job to collect these. See [Prometheus scrape configuration](/prometheus/scrape-config) for an example.
+
+  </Accordion>
+
+</AccordionGroup>

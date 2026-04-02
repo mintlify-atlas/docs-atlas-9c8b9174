@@ -1,0 +1,91 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Blackbox Exporter",
+  "projectDescription": "A Prometheus exporter that enables blackbox probing of endpoints over HTTP, HTTPS, DNS, TCP, ICMP, gRPC, and WebSocket protocols.",
+  "theme": "aspen",
+  "primaryColor": "#e86441",
+  "lightColor": "#f4b7a8",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/modules",
+              "configuration/tls-auth"
+            ]
+          },
+          {
+            "group": "Probers",
+            "pages": [
+              "probers/http",
+              "probers/tcp",
+              "probers/dns",
+              "probers/icmp",
+              "probers/grpc",
+              "probers/websocket"
+            ]
+          },
+          {
+            "group": "Prometheus Integration",
+            "pages": [
+              "prometheus/scrape-config",
+              "prometheus/metrics",
+              "prometheus/multi-target"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/permissions",
+              "operations/config-reload",
+              "operations/logging",
+              "operations/debugging"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-protocol probing: HTTP, HTTPS, TCP, DNS, ICMP, gRPC, WebSocket, Unix sockets",
+    "Rich HTTP probing with status codes, headers, body matching, TLS, OAuth2, and CEL expressions",
+    "DNS-over-TLS and full DNS response validation with regex-based RR checks",
+    "ICMP ping with configurable TTL, payload size, and DF-bit support",
+    "gRPC health check probing with TLS and custom metadata",
+    "TCP query/response sequences with STARTTLS upgrades and exact byte matching",
+    "Automatic and SIGHUP-triggered config reload",
+    "Debug endpoint with per-probe log output and probe history",
+    "TLS certificate monitoring (expiry, chain info, cipher suite)",
+    "Multi-target exporter pattern for Prometheus relabeling"
+  ],
+  "publicApiSurface": [
+    "GET /probe?target=<url>&module=<module>[&debug=true]",
+    "GET /metrics",
+    "GET /config",
+    "POST /-/reload",
+    "GET /-/healthy",
+    "GET /logs?id=<id> or /logs?target=<target>[&module=<module>]",
+    "--config.file flag",
+    "--timeout-offset flag",
+    "--log.level flag",
+    "--log.prober flag",
+    "--config.enable-auto-reload flag",
+    "--config.auto-reload-interval flag",
+    "--history.limit flag",
+    "--web.external-url flag",
+    "--web.config.file flag (TLS/auth)"
+  ]
+}

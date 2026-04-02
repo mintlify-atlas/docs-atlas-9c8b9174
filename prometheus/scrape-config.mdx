@@ -1,0 +1,129 @@
+---
+title: 'Prometheus scrape configuration'
+description: 'Configure Prometheus to scrape the Blackbox Exporter using relabeling.'
+keywords: ['prometheus', 'scrape', 'relabeling', 'blackbox exporter', 'multi-target']
+---
+
+The Blackbox Exporter implements the multi-target exporter pattern: a single exporter instance probes many targets on demand. Instead of scraping the exporter directly, Prometheus passes the target address as a URL parameter to the exporter's `/probe` endpoint. The exporter runs the probe and returns the results as metrics for that one target.
+
+This is different from exporters like `node_exporter`, where one exporter runs per monitored host. With the Blackbox Exporter, Prometheus drives which targets are probed and when.
+
+## Basic scrape config
+
+The following configuration shows the complete setup from static targets to a separate job for the exporter's own metrics.
+
+```yaml
+scrape_configs:
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]  # Look for a HTTP 200 response.
+    static_configs:
+      - targets:
+        - http://prometheus.io    # Target to probe with http.
+        - https://prometheus.io   # Target to probe with https.
+        - http://example.com:8080 # Target to probe with http on port 8080.
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115  # The blackbox exporter's real hostname:port.
+  - job_name: 'blackbox_exporter'  # collect blackbox exporter's operational metrics.
+    static_configs:
+      - targets: ['127.0.0.1:9115']
+```
+
+## Relabel config explained
+
+The three `relabel_configs` steps work together to redirect Prometheus scrapes through the exporter.
+
+### Step 1: copy `__address__` to `__param_target`
+
+```yaml
+- source_labels: [__address__]
+  target_label: __param_target
+```
+
+At this point, `__address__` holds the target URL from `static_configs` (for example, `http://prometheus.io`). This step copies it into `__param_target`, which becomes the `target=` query parameter sent to `/probe`.
+
+### Step 2: copy `__param_target` to `instance`
+
+```yaml
+- source_labels: [__param_target]
+  target_label: instance
+```
+
+This sets the `instance` label on the resulting metrics to the probed target's address. Without this step, `instance` would be overwritten in the next step and you'd lose the identity of what was probed.
+
+### Step 3: set `__address__` to the exporter's address
+
+```yaml
+- target_label: __address__
+  replacement: 127.0.0.1:9115  # The blackbox exporter's real hostname:port.
+```
+
+This replaces `__address__` with the Blackbox Exporter's own address. Prometheus will now send the HTTP scrape request to the exporter, not to the original target.
+
+After relabeling, Prometheus makes a request like:
+
+```
+http://127.0.0.1:9115/probe?target=http%3A%2F%2Fprometheus.io&module=http_2xx
+```
+
+## Using `dns_sd_configs` with the `hostname` parameter
+
+When targets are resolved via DNS service discovery, their `__address__` values are IP addresses rather than hostnames. The `hostname` parameter lets you pass the original hostname separately so the exporter can set the correct `Host` header and TLS SNI.
+
+```yaml
+scrape_configs:
+  - job_name: blackbox_all
+    metrics_path: /probe
+    params:
+      module: [ http_2xx ]  # Look for a HTTP 200 response.
+    dns_sd_configs:
+      - names:
+          - example.com
+          - prometheus.io
+        type: A
+        port: 443
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+        replacement: https://$1/  # Make probe URL be like https://1.2.3.4:443/
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115  # The blackbox exporter's real hostname:port.
+      - source_labels: [__meta_dns_name]
+        target_label: __param_hostname  # Make domain name become 'Host' header for probe requests
+      - source_labels: [__meta_dns_name]
+        target_label: vhost  # and store it in 'vhost' label
+```
+
+The `__param_hostname` label becomes the `hostname=` query parameter on the `/probe` request. For HTTP probes, the exporter uses this value as the `Host` request header. For both HTTP and TCP probes, it is also used as the TLS SNI value during the handshake.
+
+This is particularly useful when probing multiple virtual hosts that share an IP address, or when you want to verify that a specific hostname resolves and responds correctly on a discovered IP.
+
+## Exporter self-metrics
+
+The Blackbox Exporter exposes its own operational metrics at `/metrics` on the same port (default `9115`). These are separate from probe results and include metrics like request counts and build information.
+
+Collect them with a dedicated job:
+
+```yaml
+- job_name: 'blackbox_exporter'
+  static_configs:
+    - targets: ['127.0.0.1:9115']
+```
+
+<Note>
+Do not point this job at `/probe`. It should scrape `/metrics` directly, which is the default `metrics_path`.
+</Note>
+
+## Timeout behavior
+
+The probe timeout is derived automatically from the `X-Prometheus-Scrape-Timeout-Seconds` header that Prometheus sends with each scrape request. The exporter subtracts a fixed offset (default `0.5` seconds, configurable with `--timeout-offset`) to leave room for network delays before the scrape itself times out.
+
+You can also set a `timeout` field in the module's configuration in `blackbox.yml`. If both are present, the shorter of the two values is used. If neither is set, the timeout defaults to 120 seconds.

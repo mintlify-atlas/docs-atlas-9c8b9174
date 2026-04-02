@@ -1,0 +1,108 @@
+---
+title: "ICMP prober"
+description: "Ping targets using ICMP echo requests and measure round-trip time."
+---
+
+The ICMP prober sends an ICMP echo request (ping) to the target and waits for an echo reply. It measures the time taken for each phase of the probe and records the hop limit (TTL) from the reply packet.
+
+The ICMP prober supports both IPv4 and IPv6. On Linux and macOS it first attempts to use unprivileged sockets; if that fails it falls back to raw sockets, which require elevated privileges.
+
+## Configuration
+
+<ParamField body="preferred_ip_protocol" type="string" default="ip6">
+  Preferred IP protocol for the probe: `ip4` or `ip6`.
+</ParamField>
+
+<ParamField body="ip_protocol_fallback" type="boolean" default="true">
+  Fall back to the other IP protocol if the preferred one is unavailable.
+</ParamField>
+
+<ParamField body="source_ip_address" type="string">
+  Source IP address to use when sending the ICMP packet.
+</ParamField>
+
+<ParamField body="dont_fragment" type="boolean" default="false">
+  Set the Don't Fragment (DF) bit in the IPv4 IP header. Only applies to IPv4 probes on Linux/Unix systems. Requires raw sockets (`CAP_NET_RAW` or root).
+</ParamField>
+
+<ParamField body="payload_size" type="number">
+  Size of the ICMP echo request payload in bytes. When not set, the payload is the string `"Prometheus Blackbox Exporter"` (28 bytes). When set, the payload is zero-padded to the specified length with that string at the start.
+</ParamField>
+
+<ParamField body="ttl" type="number">
+  Time-to-live (TTL) for outbound ICMP packets. Must be in the range 0–255. Use this to test reachability within a given number of network hops, for example to detect routing changes.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```yaml icmp
+modules:
+  icmp:
+    prober: icmp
+```
+
+```yaml icmp_ttl5
+modules:
+  icmp_ttl5:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      ttl: 5
+```
+
+```yaml icmp_example
+modules:
+  icmp_example:
+    prober: icmp
+    timeout: 5s
+    icmp:
+      preferred_ip_protocol: "ip4"
+      source_ip_address: "127.0.0.1"
+```
+
+</CodeGroup>
+
+## Required permissions
+
+The ICMP prober requires elevated privileges to open raw or unprivileged ICMP sockets.
+
+<AccordionGroup>
+  <Accordion title="Linux">
+    Either of the following is required:
+
+    - A user whose group ID falls within the `net.ipv4.ping_group_range` sysctl range. Many distributions configure this by default in `/etc/sysctl.conf`. To allow any user, set:
+
+      ```bash
+      net.ipv4.ping_group_range = 0 2147483647
+      ```
+
+    - The `CAP_NET_RAW` capability granted to the `blackbox_exporter` binary:
+
+      ```bash
+      setcap cap_net_raw+ep blackbox_exporter
+      ```
+
+    - The root user.
+  </Accordion>
+
+  <Accordion title="Windows">
+    Administrator privileges are required.
+  </Accordion>
+
+  <Accordion title="BSD">
+    The root user is required.
+  </Accordion>
+
+  <Accordion title="macOS (OS X)">
+    No additional privileges are needed. Unprivileged ICMP sockets are supported natively.
+  </Accordion>
+</AccordionGroup>
+
+## Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `probe_icmp_duration_seconds{phase}` | Duration of the ICMP probe by phase: `resolve`, `setup`, `rtt` |
+| `probe_icmp_reply_hop_limit` | Hop limit (TTL for IPv4) from the received ICMP reply packet. Not emitted if the value cannot be read from the packet. |

@@ -1,0 +1,76 @@
+---
+title: "Configuration reload"
+description: "Reload the Blackbox Exporter configuration without restarting."
+---
+
+The Blackbox Exporter can reload its configuration file at runtime without restarting. If the new configuration is invalid, the changes are not applied and the previously loaded configuration remains active.
+
+## Reload methods
+
+<Steps>
+  <Step title="Send SIGHUP">
+    Send the `SIGHUP` signal to the running exporter process:
+
+    ```bash
+    kill -HUP <pid>
+    ```
+
+    The exporter logs `Reloaded config file` on success, or an error message if the new config is invalid.
+  </Step>
+
+  <Step title="HTTP POST to /-/reload">
+    Send an HTTP `POST` request to the `/-/reload` endpoint:
+
+    ```bash
+    curl -X POST http://localhost:9115/-/reload
+    ```
+
+    The endpoint returns an HTTP 500 with an error message if the config is invalid. On success it returns HTTP 200 with no body.
+
+    <Note>
+      Only `POST` requests are accepted. A `GET` request to `/-/reload` returns HTTP 405.
+    </Note>
+  </Step>
+
+  <Step title="Enable auto-reload">
+    Pass `--config.enable-auto-reload` at startup to have the exporter periodically check for configuration changes:
+
+    ```bash
+    ./blackbox_exporter \
+      --config.file=blackbox.yml \
+      --config.enable-auto-reload \
+      --config.auto-reload-interval=30
+    ```
+
+    | Flag | Default | Description |
+    |------|---------|-------------|
+    | `--config.enable-auto-reload` | `false` | Enable automatic configuration reloading. |
+    | `--config.auto-reload-interval` | `30` | Interval in seconds between configuration checks. |
+
+    The exporter only reloads when the file content has actually changed. If the updated configuration is invalid, it logs an error and keeps the previous configuration.
+  </Step>
+</Steps>
+
+## Validate configuration without starting
+
+Use `--config.check` to validate a configuration file and exit without starting the server:
+
+```bash
+./blackbox_exporter --config.file=blackbox.yml --config.check
+```
+
+The exporter logs `Config file is ok exiting...` and exits with code `0` on success, or logs an error and exits with code `1` on failure.
+
+## View the current configuration
+
+The currently loaded configuration is available at the `/config` endpoint:
+
+```bash
+curl http://localhost:9115/config
+```
+
+The response is the active configuration marshalled as YAML.
+
+<Note>
+  If a reload fails due to an invalid configuration, `/config` continues to return the last successfully loaded configuration.
+</Note>

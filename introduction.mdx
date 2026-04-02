@@ -3,7 +3,7 @@ title: "Blackbox Exporter"
 description: "Probe HTTP, HTTPS, DNS, TCP, ICMP, gRPC, and WebSocket endpoints and export results as Prometheus metrics."
 ---
 
-The Blackbox Exporter enables blackbox probing of network endpoints, turning probe results into Prometheus metrics. Use it to monitor endpoint availability, TLS certificate expiry, DNS resolution, and protocol-level health.
+The Blackbox Exporter enables blackbox probing of network endpoints, turning probe results into Prometheus metrics. Use it to monitor endpoint availability, TLS certificate expiry, DNS resolution, and protocol-level health — all from a Prometheus scrape target.
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="rocket" href="/quickstart">
@@ -19,6 +19,16 @@ The Blackbox Exporter enables blackbox probing of network endpoints, turning pro
     HTTP, TCP, DNS, ICMP, gRPC, and WebSocket probers
   </Card>
 </CardGroup>
+
+## What is the Blackbox Exporter?
+
+The Blackbox Exporter sits between Prometheus and the services you want to monitor. Prometheus sends a scrape request to `/probe` with a target URL and module name. The exporter probes that target using the configured protocol and returns Prometheus-formatted metrics describing the outcome.
+
+```
+Prometheus → /probe?target=example.com&module=http_2xx → Blackbox Exporter → example.com
+```
+
+This makes it possible to monitor external endpoints, SLAs, and synthetic checks without modifying the services themselves.
 
 ## Supported protocols
 
@@ -43,6 +53,14 @@ The Blackbox Exporter enables blackbox probing of network endpoints, turning pro
   </Card>
 </CardGroup>
 
+## Key capabilities
+
+- **Multi-target pattern** — One exporter instance probes many targets via Prometheus relabeling
+- **Debug mode** — Add `debug=true` to any probe request to see full probe logs inline
+- **TLS monitoring** — Track certificate expiry, chain validity, TLS version, and cipher suite
+- **Config hot-reload** — Reload configuration via SIGHUP, HTTP POST, or automatic polling
+- **Probe history** — Browse recent probe results in the built-in web UI at `http://localhost:9115`
+
 ## Quick example
 
 ```bash
@@ -54,5 +72,5 @@ curl "http://localhost:9115/probe?target=https://example.com&module=http_2xx"
 ```
 
 <Note>
-  The `probe_success` metric in the response is `1` for a successful probe and `0` for a failed probe.
+  The `probe_success` metric in the response is `1` for a successful probe and `0` for a failed probe. This is the primary metric to alert on.
 </Note>

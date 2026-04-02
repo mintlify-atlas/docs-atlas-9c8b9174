@@ -1,0 +1,362 @@
+---
+title: "HTTP prober"
+description: "Probe HTTP and HTTPS endpoints for status codes, headers, body content, TLS, and redirects."
+---
+
+The HTTP prober sends an HTTP request to the target and validates the response. It checks the response status code, HTTP version, response headers, and response body against configured expectations. It also measures timing across each phase of the request lifecycle and collects TLS certificate metadata when the connection uses HTTPS.
+
+## Configuration
+
+<ParamField body="valid_status_codes" type="number[]" default="2xx">
+  List of HTTP status codes considered successful. When empty, any 2xx response is accepted.
+</ParamField>
+
+<ParamField body="valid_http_versions" type="string[]">
+  List of HTTP versions accepted as valid responses. For example, `["HTTP/1.1", "HTTP/2.0"]`. When empty, any version is accepted.
+</ParamField>
+
+<ParamField body="method" type="string" default="GET">
+  The HTTP method to use for the probe request (e.g., `GET`, `POST`, `HEAD`).
+</ParamField>
+
+<ParamField body="headers" type="object">
+  Static HTTP headers to include in the request. Specified as key-value pairs. The `Host` key sets the HTTP host header.
+
+  ```yaml
+  headers:
+    Host: vhost.example.com
+    Origin: example.com
+  ```
+</ParamField>
+
+<ParamField body="http_headers" type="object">
+  Additional headers that can be populated from literal values, secrets, or files. When multiple sources are specified for a header, only the last one is used.
+
+  ```yaml
+  http_headers:
+    Accept-Language:
+      values:
+        - "en-US"
+    X-API-Key:
+      files:
+        - /path/to/api-key.txt
+  ```
+</ParamField>
+
+<ParamField body="body_size_limit" type="string" default="0">
+  Maximum uncompressed response body size to read, in bytes. A value of `0` means no limit. This limit is applied after decompression if `compression` is set. The `Content-Length` response header is not validated against this value.
+
+  Example: `10MB`
+</ParamField>
+
+<ParamField body="compression" type="string" default="">
+  Compression algorithm used to decompress the response body. Accepted values: `gzip`, `br`, `deflate`, `identity`. When set, the response body is treated as compressed using this algorithm — a decompression failure causes the probe to fail.
+</ParamField>
+
+<ParamField body="follow_redirects" type="boolean" default="true">
+  Whether the probe follows HTTP redirects. When `false`, the probe stops at the first redirect response. Up to 10 redirects are followed when enabled.
+</ParamField>
+
+<ParamField body="fail_if_ssl" type="boolean" default="false">
+  Probe fails if the final request (after redirects) uses SSL/TLS.
+</ParamField>
+
+<ParamField body="fail_if_not_ssl" type="boolean" default="false">
+  Probe fails if the final request (after redirects) does not use SSL/TLS.
+</ParamField>
+
+<ParamField body="fail_if_body_json_matches_cel" type="string">
+  Probe fails if the response body, parsed as JSON, matches this [CEL expression](https://github.com/google/cel-spec). Also fails if the response body is not valid JSON. The parsed body is available as the `body` variable in the expression.
+
+  Example: `body.status == 'error'`
+</ParamField>
+
+<ParamField body="fail_if_body_json_not_matches_cel" type="string">
+  Probe fails if the response body, parsed as JSON, does not match this [CEL expression](https://github.com/google/cel-spec). Also fails if the response body is not valid JSON.
+
+  Example: `body.foo == 'bar' && body.baz.startsWith('q')`
+</ParamField>
+
+<ParamField body="fail_if_body_matches_regexp" type="string[]">
+  Probe fails if the response body matches any of these regular expressions.
+</ParamField>
+
+<ParamField body="fail_if_body_not_matches_regexp" type="string[]">
+  Probe fails if the response body does not match any of these regular expressions.
+</ParamField>
+
+<ParamField body="fail_if_header_matches" type="object[]">
+  Probe fails if any response header matches the given regular expression. For headers with multiple values, the probe fails if at least one value matches.
+
+  <Expandable title="fields">
+    <ParamField body="header" type="string" required>
+      The name of the response header to check.
+    </ParamField>
+    <ParamField body="regexp" type="string" required>
+      Regular expression to match against the header value.
+    </ParamField>
+    <ParamField body="allow_missing" type="boolean" default="false">
+      When `true`, a missing header does not cause the probe to fail.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="fail_if_header_not_matches" type="object[]">
+  Probe fails if no value of a response header matches the given regular expression. For headers with multiple values, the probe fails only if none of them match.
+
+  <Expandable title="fields">
+    <ParamField body="header" type="string" required>
+      The name of the response header to check.
+    </ParamField>
+    <ParamField body="regexp" type="string" required>
+      Regular expression to match against the header value.
+    </ParamField>
+    <ParamField body="allow_missing" type="boolean" default="false">
+      When `true`, a missing header does not cause the probe to fail.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="tls_config" type="object">
+  TLS configuration for HTTPS connections.
+
+  <Expandable title="fields">
+    <ParamField body="insecure_skip_verify" type="boolean" default="false">
+      Disable server certificate verification.
+    </ParamField>
+    <ParamField body="ca_file" type="string">
+      Path to a CA certificate file to use for verification.
+    </ParamField>
+    <ParamField body="cert_file" type="string">
+      Path to a client certificate file for mutual TLS.
+    </ParamField>
+    <ParamField body="key_file" type="string">
+      Path to the client private key file for mutual TLS.
+    </ParamField>
+    <ParamField body="server_name" type="string">
+      Override the server name used for certificate verification.
+    </ParamField>
+    <ParamField body="min_version" type="string">
+      Minimum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`. Defaults to Go's minimum (TLS 1.2).
+    </ParamField>
+    <ParamField body="max_version" type="string">
+      Maximum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`. Defaults to Go's maximum (TLS 1.3).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="basic_auth" type="object">
+  HTTP Basic Authentication credentials.
+
+  <Expandable title="fields">
+    <ParamField body="username" type="string">Username.</ParamField>
+    <ParamField body="password" type="string">Password.</ParamField>
+    <ParamField body="username_file" type="string">Path to a file containing the username.</ParamField>
+    <ParamField body="password_file" type="string">Path to a file containing the password.</ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="authorization" type="object">
+  Sets the `Authorization` header on the request.
+
+  <Expandable title="fields">
+    <ParamField body="type" type="string" default="Bearer">
+      Authentication type (e.g., `Bearer`, `Token`).
+    </ParamField>
+    <ParamField body="credentials" type="string">
+      Credential value. Mutually exclusive with `credentials_file`.
+    </ParamField>
+    <ParamField body="credentials_file" type="string">
+      Path to a file containing the credential value. Mutually exclusive with `credentials`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="oauth2" type="object">
+  OAuth 2.0 client credentials grant configuration. The exporter fetches a token and attaches it to the request.
+
+  <Note>OAuth 2.0 support is experimental and may not be reflected correctly in all probe metrics.</Note>
+
+  <Expandable title="fields">
+    <ParamField body="client_id" type="string" required>OAuth 2.0 client ID.</ParamField>
+    <ParamField body="client_secret" type="string">OAuth 2.0 client secret. Mutually exclusive with `client_secret_file`.</ParamField>
+    <ParamField body="client_secret_file" type="string">Path to a file containing the client secret.</ParamField>
+    <ParamField body="token_url" type="string" required>URL to fetch the access token from.</ParamField>
+    <ParamField body="scopes" type="string[]">Token scopes to request.</ParamField>
+    <ParamField body="endpoint_params" type="object">Additional parameters to append to the token URL.</ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="proxy_url" type="string">
+  HTTP proxy server URL for the probe connection.
+</ParamField>
+
+<ParamField body="no_proxy" type="string">
+  Comma-separated list of hosts, IPs, or CIDR ranges to exclude from proxying. Hosts and IPs may include port numbers.
+</ParamField>
+
+<ParamField body="proxy_from_environment" type="boolean" default="false">
+  Use the proxy settings from environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`).
+</ParamField>
+
+<ParamField body="proxy_connect_header" type="object">
+  Headers to send to the proxy during `CONNECT` requests. Specified as header name to list of secret values.
+</ParamField>
+
+<ParamField body="skip_resolve_phase_with_proxy" type="boolean" default="false">
+  Skip DNS resolution and URL rewriting when an HTTP proxy is configured. Useful when the proxy is responsible for resolving the target hostname.
+</ParamField>
+
+<ParamField body="enable_http2" type="boolean" default="true">
+  Whether to allow HTTP/2 connections.
+</ParamField>
+
+<ParamField body="enable_http3" type="boolean" default="false">
+  Whether to use HTTP/3 (QUIC). When enabled, `enable_http2` must be set to `false` and `valid_http_versions` must not include `HTTP/2.0`. The target is automatically upgraded to HTTPS.
+</ParamField>
+
+<ParamField body="preferred_ip_protocol" type="string" default="ip6">
+  Preferred IP protocol for the probe: `ip4` or `ip6`.
+</ParamField>
+
+<ParamField body="ip_protocol_fallback" type="boolean" default="true">
+  Fall back to the other IP protocol if the preferred one is unavailable.
+</ParamField>
+
+<ParamField body="body" type="string">
+  Request body to send with the probe. Mutually exclusive with `body_file`.
+</ParamField>
+
+<ParamField body="body_file" type="string">
+  Path to a file whose contents are used as the request body. Mutually exclusive with `body`.
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```yaml http_2xx_example
+modules:
+  http_2xx_example:
+    prober: http
+    timeout: 5s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []  # Defaults to 2xx
+      method: GET
+      headers:
+        Host: vhost.example.com
+        Origin: example.com
+      http_headers:
+        Accept-Language:
+          values:
+            - "en-US"
+      follow_redirects: true
+      fail_if_ssl: false
+      fail_if_not_ssl: false
+      fail_if_body_matches_regexp:
+        - "Could not connect to database"
+      fail_if_body_not_matches_regexp:
+        - "Download the latest version here"
+      fail_if_header_matches:
+        - header: Set-Cookie
+          allow_missing: true
+          regexp: '.*'
+      fail_if_header_not_matches:
+        - header: Access-Control-Allow-Origin
+          regexp: '(\*|example\.com)'
+      tls_config:
+        insecure_skip_verify: false
+      preferred_ip_protocol: "ip4"
+      ip_protocol_fallback: false
+```
+
+```yaml http_post_2xx
+modules:
+  http_post_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: '{}'
+```
+
+```yaml http_basic_auth_example
+modules:
+  http_basic_auth_example:
+    prober: http
+    timeout: 5s
+    http:
+      method: POST
+      headers:
+        Host: "login.example.com"
+      basic_auth:
+        username: "username"
+        password: "mysecret"
+```
+
+```yaml http_json_cel_match
+modules:
+  http_json_cel_match:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      fail_if_body_json_not_matches_cel: "body.foo == 'bar' && body.baz.startsWith('q')"
+```
+
+```yaml http_custom_ca_example
+modules:
+  http_custom_ca_example:
+    prober: http
+    http:
+      method: GET
+      tls_config:
+        ca_file: "/certs/my_cert.crt"
+```
+
+```yaml http_2xx_oauth_client_credentials
+modules:
+  http_2xx_oauth_client_credentials:
+    prober: http
+    timeout: 5s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2"]
+      follow_redirects: true
+      preferred_ip_protocol: "ip4"
+      valid_status_codes:
+        - 200
+        - 201
+      oauth2:
+        client_id: "client_id"
+        client_secret: "client_secret"
+        token_url: "https://api.example.com/token"
+        endpoint_params:
+          grant_type: "client_credentials"
+```
+
+</CodeGroup>
+
+## Metrics
+
+The HTTP prober emits the following metrics on each probe:
+
+| Metric | Description |
+|--------|-------------|
+| `probe_http_status_code` | HTTP response status code |
+| `probe_http_version` | HTTP protocol version of the response |
+| `probe_http_duration_seconds{phase}` | Request duration by phase: `resolve`, `connect`, `tls`, `processing`, `transfer` |
+| `probe_http_content_length` | Value of the `Content-Length` response header |
+| `probe_http_uncompressed_body_length` | Bytes read from the response body after decompression |
+| `probe_http_redirects` | Number of redirects followed |
+| `probe_http_ssl` | `1` if the final request used SSL/TLS, `0` otherwise |
+| `probe_http_last_modified_timestamp_seconds` | Value of the `Last-Modified` response header as a Unix timestamp (when present) |
+| `probe_failed_due_to_regex` | `1` if the probe failed due to a body or header regex match |
+| `probe_failed_due_to_cel` | `1` if the probe failed due to a CEL expression (only registered when CEL checks are configured) |
+| `probe_ssl_earliest_cert_expiry` | Earliest TLS certificate expiry timestamp in Unix seconds (HTTPS only) |
+| `probe_ssl_last_chain_expiry_timestamp_seconds` | Expiry of the last certificate in the chain (HTTPS only) |
+| `probe_ssl_last_chain_info` | TLS leaf certificate metadata: fingerprint, subject, issuer, SANs, serial number |
+| `probe_tls_version_info{version}` | TLS version in use (HTTPS only) |
+| `probe_tls_cipher_info{cipher}` | TLS cipher suite negotiated during the handshake (HTTPS only) |

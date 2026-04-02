@@ -1,0 +1,280 @@
+---
+title: "Modules"
+description: "Define reusable probe configurations as named modules in blackbox.yml."
+---
+
+A module is a named probe configuration in `blackbox.yml`. When Prometheus scrapes `/probe`, it passes a `module` query parameter that selects which module to use for that probe.
+
+```
+/probe?target=https://example.com&module=http_2xx
+```
+
+You can define as many modules as you need — one per protocol variant, authentication method, or validation rule you want to test.
+
+## Module fields
+
+```yaml
+modules:
+  <module_name>:
+    # Required. The protocol the probe will use.
+    prober: <http|tcp|dns|icmp|grpc|unix|websocket>
+
+    # Optional. Maximum time to wait before the probe fails.
+    # If omitted, the effective timeout is derived from the Prometheus
+    # scrape_timeout minus the --timeout-offset flag (default 0.5s).
+    timeout: <duration>
+
+    # Prober-specific configuration block. Set at most one.
+    http: { ... }
+    tcp: { ... }
+    dns: { ... }
+    icmp: { ... }
+    grpc: { ... }
+    unix: { ... }
+    websocket: { ... }
+```
+
+<Note>
+  The effective probe timeout is the **lower** of the module `timeout` and the Prometheus `scrape_timeout` minus `--timeout-offset`. This prevents the exporter from running past Prometheus's hard deadline.
+</Note>
+
+## Built-in example modules
+
+The following modules ship in the default `blackbox.yml` and cover the most common probe patterns.
+
+<AccordionGroup>
+  <Accordion title="http_2xx — basic HTTP GET">
+    Probes an HTTP endpoint and succeeds on any 2xx response. Uses IPv4.
+
+    ```yaml
+    http_2xx:
+      prober: http
+      http:
+        preferred_ip_protocol: "ip4"
+    ```
+  </Accordion>
+
+  <Accordion title="http_post_2xx — HTTP POST">
+    Sends an HTTP POST and succeeds on any 2xx response.
+
+    ```yaml
+    http_post_2xx:
+      prober: http
+      http:
+        method: POST
+    ```
+  </Accordion>
+
+  <Accordion title="tcp_connect — bare TCP connection">
+    Succeeds if a TCP connection can be established. No data is sent or expected.
+
+    ```yaml
+    tcp_connect:
+      prober: tcp
+    ```
+  </Accordion>
+
+  <Accordion title="ssh_banner — SSH version check">
+    Connects to an SSH server and checks that the banner starts with `SSH-2.0-`.
+
+    ```yaml
+    ssh_banner:
+      prober: tcp
+      tcp:
+        query_response:
+          - expect: "^SSH-2.0-"
+          - send: "SSH-2.0-blackbox-ssh-check"
+    ```
+  </Accordion>
+
+  <Accordion title="ssh_banner_extract — SSH banner with label extraction">
+    Same as `ssh_banner` but extracts the SSH version and comments into probe labels using regex capture groups.
+
+    ```yaml
+    ssh_banner_extract:
+      prober: tcp
+      timeout: 5s
+      tcp:
+        query_response:
+          - expect: "^SSH-2.0-([^ -]+)(?: (.*))?$"
+            labels:
+              - name: ssh_version
+                value: "${1}"
+              - name: ssh_comments
+                value: "${2}"
+    ```
+  </Accordion>
+
+  <Accordion title="pop3s_banner — POP3S with TLS">
+    Connects over TLS and expects a `+OK` banner from a POP3 server.
+
+    ```yaml
+    pop3s_banner:
+      prober: tcp
+      tcp:
+        query_response:
+          - expect: "^+OK"
+        tls: true
+        tls_config:
+          insecure_skip_verify: false
+    ```
+  </Accordion>
+
+  <Accordion title="grpc — gRPC health check with TLS">
+    Sends a gRPC health check request over TLS using IPv4.
+
+    ```yaml
+    grpc:
+      prober: grpc
+      grpc:
+        tls: true
+        preferred_ip_protocol: "ip4"
+    ```
+  </Accordion>
+
+  <Accordion title="grpc_plain — gRPC health check without TLS">
+    Sends a gRPC health check to a named service without TLS.
+
+    ```yaml
+    grpc_plain:
+      prober: grpc
+      grpc:
+        tls: false
+        service: "service1"
+    ```
+  </Accordion>
+
+  <Accordion title="icmp — ICMP ping">
+    Sends an ICMP echo request (ping) to the target.
+
+    ```yaml
+    icmp:
+      prober: icmp
+    ```
+  </Accordion>
+
+  <Accordion title="icmp_ttl5 — ICMP with TTL limit">
+    ICMP ping with a TTL of 5. Useful for testing reachability within a bounded number of network hops.
+
+    ```yaml
+    icmp_ttl5:
+      prober: icmp
+      timeout: 5s
+      icmp:
+        ttl: 5
+    ```
+  </Accordion>
+
+  <Accordion title="irc_banner — IRC server check">
+    Performs the IRC handshake and waits for the welcome message (`001`).
+
+    ```yaml
+    irc_banner:
+      prober: tcp
+      tcp:
+        query_response:
+          - send: "NICK prober"
+          - send: "USER prober prober prober :prober"
+          - expect: "PING :([^ ]+)"
+            send: "PONG ${1}"
+          - expect: "^:[^ ]+ 001"
+    ```
+  </Accordion>
+
+  <Accordion title="websocket — WebSocket connection">
+    Establishes a WebSocket connection to the target.
+
+    ```yaml
+    websocket:
+      prober: websocket
+    ```
+  </Accordion>
+
+  <Accordion title="http_3xx — HTTP/3 probe">
+    Probes using HTTP/3. HTTP/2 must be explicitly disabled when HTTP/3 is active.
+
+    ```yaml
+    http_3xx:
+      prober: http
+      http:
+        preferred_ip_protocol: "ip4"
+        enable_http3: true
+        enable_http2: false
+        valid_http_versions: ["HTTP/3.0"]
+    ```
+  </Accordion>
+
+  <Accordion title="postgresql — PostgreSQL SSL check">
+    Sends a PostgreSQL SSLRequest packet and checks for an SSL-enabled response.
+
+    ```yaml
+    postgresql:
+      prober: tcp
+      tcp:
+        query_response:
+          - send: !!binary AAAACATSFi8=   # PostgreSQL SSLRequest
+          - expect_bytes: S               # 'S' = SSL enabled, 'N' = not enabled
+          - starttls: true
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Selecting a module per probe
+
+Pass the module name as a query parameter on each `/probe` request:
+
+```
+/probe?target=https://example.com&module=http_2xx
+/probe?target=redis.internal:6379&module=tcp_connect
+/probe?target=8.8.8.8&module=icmp
+```
+
+Prometheus uses relabeling to inject the `module` parameter automatically. See the [Prometheus integration](/prometheus/scrape-config) docs for a full scrape config example.
+
+## Complete annotated example
+
+This module checks an HTTP endpoint with body validation, header checks, and strict TLS:
+
+```yaml
+modules:
+  http_2xx_example:
+    prober: http
+    timeout: 5s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: []       # empty list defaults to 2xx
+      method: GET
+      headers:
+        Host: vhost.example.com
+        Origin: example.com
+      http_headers:
+        Accept-Language:
+          values:
+            - "en-US"
+      follow_redirects: true
+      fail_if_ssl: false
+      fail_if_not_ssl: false
+      fail_if_body_matches_regexp:
+        - "Could not connect to database"
+      fail_if_body_not_matches_regexp:
+        - "Download the latest version here"
+      fail_if_header_matches:          # fail if any Set-Cookie header exists
+        - header: Set-Cookie
+          allow_missing: true
+          regexp: '.*'
+      fail_if_header_not_matches:
+        - header: Access-Control-Allow-Origin
+          regexp: '(\*|example\.com)'
+      tls_config:
+        insecure_skip_verify: false
+      preferred_ip_protocol: "ip4"
+      ip_protocol_fallback: false      # do not fall back to IPv6
+```
+
+## Unknown modules
+
+If Prometheus requests a module name that does not exist in the config file, the probe fails immediately and the `blackbox_module_unknown_total` counter is incremented. Monitor this counter to detect misconfigured scrape jobs.
+
+```promql
+blackbox_module_unknown_total > 0
+```

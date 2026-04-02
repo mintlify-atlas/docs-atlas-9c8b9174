@@ -1,0 +1,199 @@
+---
+title: "WebSocket prober"
+description: "Probe WebSocket endpoints and validate message-level query/response sequences."
+---
+
+The WebSocket prober connects to a WebSocket endpoint by performing the HTTP Upgrade handshake, then optionally executes a sequence of send/expect steps at the message level. It measures timing across the DNS resolution, TCP connection, and HTTP/WebSocket handshake phases.
+
+Authentication credentials are translated into HTTP headers before the connection is established.
+
+## Configuration
+
+<ParamField body="preferred_ip_protocol" type="string" default="ip6">
+  Preferred IP protocol for the connection: `ip4` or `ip6`.
+</ParamField>
+
+<ParamField body="ip_protocol_fallback" type="boolean" default="true">
+  Fall back to the other IP protocol if the preferred one is unavailable.
+</ParamField>
+
+<ParamField body="headers" type="object">
+  Additional HTTP headers to include in the WebSocket upgrade request. Each header can supply values from literal strings, secrets, or files.
+
+  ```yaml
+  headers:
+    X-Some-Header:
+      values:
+        - "my_header"
+    X-API-Key:
+      files:
+        - /path/to/api-key.txt
+  ```
+</ParamField>
+
+<ParamField body="http_config" type="object">
+  HTTP client configuration for the WebSocket upgrade request. Used to supply authentication and TLS settings.
+
+  <Expandable title="fields">
+    <ParamField body="basic_auth" type="object">
+      HTTP Basic Authentication. Credentials are encoded and sent in the `Authorization` header.
+
+      <Expandable title="fields">
+        <ParamField body="username" type="string">Username.</ParamField>
+        <ParamField body="password" type="string">Password.</ParamField>
+        <ParamField body="username_file" type="string">Path to a file containing the username.</ParamField>
+        <ParamField body="password_file" type="string">Path to a file containing the password.</ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField body="authorization" type="object">
+      Sets the `Authorization` header directly.
+
+      <Expandable title="fields">
+        <ParamField body="type" type="string" default="Bearer">
+          Authentication type (e.g., `Bearer`, `Token`).
+        </ParamField>
+        <ParamField body="credentials" type="string">
+          Credential value. Mutually exclusive with `credentials_file`.
+        </ParamField>
+        <ParamField body="credentials_file" type="string">
+          Path to a file containing the credential value.
+        </ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField body="oauth2" type="object">
+      OAuth 2.0 client credentials configuration.
+
+      <Expandable title="fields">
+        <ParamField body="client_id" type="string" required>OAuth 2.0 client ID.</ParamField>
+        <ParamField body="client_secret" type="string">OAuth 2.0 client secret.</ParamField>
+        <ParamField body="client_secret_file" type="string">Path to a file containing the client secret.</ParamField>
+        <ParamField body="token_url" type="string" required>URL to fetch the access token from.</ParamField>
+        <ParamField body="scopes" type="string[]">Token scopes to request.</ParamField>
+        <ParamField body="endpoint_params" type="object">Additional parameters for the token endpoint.</ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField body="tls_config" type="object">
+      TLS configuration for the WebSocket connection (`wss://`).
+
+      <Expandable title="fields">
+        <ParamField body="insecure_skip_verify" type="boolean" default="false">
+          Disable server certificate verification.
+        </ParamField>
+        <ParamField body="ca_file" type="string">
+          Path to a CA certificate file.
+        </ParamField>
+        <ParamField body="cert_file" type="string">
+          Path to a client certificate file for mutual TLS.
+        </ParamField>
+        <ParamField body="key_file" type="string">
+          Path to the client private key file.
+        </ParamField>
+        <ParamField body="server_name" type="string">
+          Override the server name for TLS certificate verification.
+        </ParamField>
+        <ParamField body="min_version" type="string">
+          Minimum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+        </ParamField>
+        <ParamField body="max_version" type="string">
+          Maximum TLS version: `TLS10`, `TLS11`, `TLS12`, or `TLS13`.
+        </ParamField>
+      </Expandable>
+    </ParamField>
+
+    <ParamField body="proxy_url" type="string">
+      HTTP proxy server URL.
+    </ParamField>
+
+    <ParamField body="no_proxy" type="string">
+      Comma-separated list of hosts, IPs, or CIDR ranges to exclude from proxying.
+    </ParamField>
+
+    <ParamField body="proxy_from_environment" type="boolean" default="false">
+      Use proxy settings from environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`).
+    </ParamField>
+
+    <ParamField body="proxy_connect_header" type="object">
+      Headers to send to the proxy during `CONNECT` requests.
+    </ParamField>
+
+    <ParamField body="follow_redirects" type="boolean" default="true">
+      Whether to follow HTTP redirects during the upgrade handshake.
+    </ParamField>
+
+    <ParamField body="enable_http2" type="boolean" default="true">
+      Whether to allow HTTP/2 for the upgrade request.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="query_response" type="object[]">
+  Ordered list of message-level send/expect steps to execute after the WebSocket connection is established. Steps are executed in sequence. Capture groups from `expect` can be referenced in `send` using `${1}`, `${2}`, etc.
+
+  <Expandable title="fields">
+    <ParamField body="expect" type="string">
+      Regular expression to match against an incoming WebSocket message. The prober reads one message before checking.
+    </ParamField>
+    <ParamField body="send" type="string">
+      WebSocket text message to send. Can reference capture groups from `expect` using `${1}`, etc. Sent after the `expect` check (if any) passes.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Examples
+
+<CodeGroup>
+
+```yaml websocket_example_basic_auth
+modules:
+  websocket_example_basic_auth:
+    prober: websocket
+    websocket:
+      http_config:
+        basic_auth:
+          username: "user"
+          password: "password"
+        tls_config:
+          insecure_skip_verify: true
+      headers:
+        X-Some-Header:
+          values:
+            - "my_header"
+      query_response:
+        - expect: '^Hello,\s(.+)"'
+          send: "Hello server, i'am ${1}"
+        - expect: "^Welcome"
+```
+
+```yaml websocket_example_bearer_token
+modules:
+  websocket_example_bearer_token:
+    prober: websocket
+    websocket:
+      http_config:
+        authorization:
+          credentials: "secret_token"
+        tls_config:
+          insecure_skip_verify: true
+      headers:
+        X-Some-Header:
+          values:
+            - "my_header"
+      query_response:
+        - expect: '^Hello,\s(.+)"'
+          send: "Hello server, i'am ${1}"
+        - expect: "^Welcome"
+```
+
+</CodeGroup>
+
+## Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `probe_websocket_duration_seconds{phase}` | Duration of the WebSocket probe by phase: `resolve`, `connect`, `processing`, `transfer` |
+| `probe_websocket_status_code` | HTTP status code of the upgrade response |
+| `probe_websocket_connection_upgraded` | `1` if the WebSocket connection was successfully established |
+| `probe_websocket_failed_due_to_regex` | `1` if the probe failed due to a `query_response` regex mismatch |

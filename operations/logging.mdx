@@ -1,0 +1,106 @@
+---
+title: "Logging"
+description: "Control log output for the exporter and probe-level logs independently."
+---
+
+The Blackbox Exporter maintains two fully independent structured loggers.
+
+| Logger | Flag | Default level | Scope |
+|--------|------|---------------|-------|
+| Application logger | `--log.level` | `info` | Startup, config reload, HTTP server, internal errors |
+| Probe/scrape logger | `--log.prober` | `info` | HTTP, TCP, ICMP, DNS, gRPC, Unix, WebSocket probe execution |
+
+Valid levels for both flags are `debug`, `info`, `warn`, and `error`.
+
+## Log format
+
+Both loggers emit structured log lines with `time`, `level`, `source`, and `msg` fields, along with additional key-value attributes depending on the event:
+
+```
+time=2025-09-09T00:58:02.557-04:00 level=INFO source=main.go:95 msg="Starting blackbox_exporter" version="..."
+```
+
+## Probe log levels
+
+The `--log.prober` flag controls how much detail appears in probe logs. Probe logs are written to stderr and are also captured per-probe for retrieval via `?debug=true`.
+
+<Tabs>
+  <Tab title="--log.prober=info (default)">
+    At `info` level, only warnings and above from the prober are written to stderr. In this example a redirect warning is emitted, but the individual request steps are not logged.
+
+    **Stderr output:**
+
+    ```shell
+    ~ $ ./blackbox_exporter --config.file ./blackbox.yml
+    time=2025-09-09T00:58:02.557-04:00 level=INFO source=main.go:95 msg="Starting blackbox_exporter" version="(version=0.27.0, branch=feat/make-scrape-logger-independent, revision=47e27d09847edf2ade2732b50663c37ed8177485)"
+    time=2025-09-09T00:58:02.557-04:00 level=INFO source=main.go:96 msg="(go=go1.24.4, platform=linux/amd64, user=tjhop@contraband, date=20250909-04:57:55, tags=unknown)"
+    time=2025-09-09T00:58:02.557-04:00 level=INFO source=main.go:108 msg="Loaded config file"
+    time=2025-09-09T00:58:02.558-04:00 level=INFO source=tls_config.go:347 msg="Listening on" address=[::]:9115
+    time=2025-09-09T00:58:02.558-04:00 level=INFO source=tls_config.go:350 msg="TLS is disabled." http2=false address=[::]:9115
+    time=2025-09-09T00:58:06.756-04:00 level=WARN source=http.go:490 msg="Received redirect" module=http_2xx target=prometheus.io location=https://prometheus.io/
+    ```
+
+    **`?debug=true` probe output (truncated at metrics boundary):**
+
+    ```shell
+    ~ $ curl -sL "http://localhost:9115/probe?target=prometheus.io&module=http_2xx&debug=true" | sed '/Metrics that would have been returned/q'
+    Logs for the probe:
+    time=2025-09-09T00:58:06.756-04:00 level=WARN source=http.go:490 msg="Received redirect" module=http_2xx target=prometheus.io location=https://prometheus.io/
+
+
+
+    Metrics that would have been returned:
+    ```
+  </Tab>
+  <Tab title="--log.prober=debug">
+    At `debug` level, every step of the probe is logged: DNS resolution, each HTTP request, response timings, TLS handshake, and the final probe result.
+
+    **Stderr output:**
+
+    ```shell
+    ~ $ ./blackbox_exporter --config.file ./blackbox.yml --log.prober=debug
+    time=2025-09-09T00:58:21.483-04:00 level=INFO source=main.go:95 msg="Starting blackbox_exporter" version="(version=0.27.0, branch=feat/make-scrape-logger-independent, revision=47e27d09847edf2ade2732b50663c37ed8177485)"
+    time=2025-09-09T00:58:21.483-04:00 level=INFO source=main.go:96 msg="(go=go1.24.4, platform=linux/amd64, user=tjhop@contraband, date=20250909-04:57:55, tags=unknown)"
+    time=2025-09-09T00:58:21.483-04:00 level=INFO source=main.go:108 msg="Loaded config file"
+    time=2025-09-09T00:58:21.484-04:00 level=INFO source=tls_config.go:347 msg="Listening on" address=[::]:9115
+    time=2025-09-09T00:58:21.484-04:00 level=INFO source=tls_config.go:350 msg="TLS is disabled." http2=false address=[::]:9115
+    time=2025-09-09T00:58:26.604-04:00 level=DEBUG source=handler.go:116 msg="Beginning probe" module=http_2xx target=prometheus.io probe=http timeout_seconds=119.5
+    time=2025-09-09T00:58:26.604-04:00 level=DEBUG source=utils.go:61 msg="Resolving target address" module=http_2xx target=prometheus.io target=prometheus.io ip_protocol=ip4
+    time=2025-09-09T00:58:26.605-04:00 level=DEBUG source=utils.go:96 msg="Resolved target address" module=http_2xx target=prometheus.io target=prometheus.io ip=104.21.60.220
+    time=2025-09-09T00:58:26.605-04:00 level=DEBUG source=http.go:209 msg="Making HTTP request" module=http_2xx target=prometheus.io url=http://104.21.60.220 host=prometheus.io
+    time=2025-09-09T00:58:26.645-04:00 level=WARN source=http.go:490 msg="Received redirect" module=http_2xx target=prometheus.io location=https://prometheus.io/
+    time=2025-09-09T00:58:26.645-04:00 level=DEBUG source=http.go:209 msg="Making HTTP request" module=http_2xx target=prometheus.io url=https://prometheus.io/ host=""
+    time=2025-09-09T00:58:26.645-04:00 level=DEBUG source=http.go:224 msg="Address does not match first address, not sending TLS ServerName" module=http_2xx target=prometheus.io first=104.21.60.220 address=prometheus.io
+    time=2025-09-09T00:58:26.765-04:00 level=DEBUG source=http.go:590 msg="Received HTTP response" module=http_2xx target=prometheus.io status_code=200
+    time=2025-09-09T00:58:26.800-04:00 level=DEBUG source=http.go:721 msg="Response timings for roundtrip" module=http_2xx target=prometheus.io roundtrip=0 start=2025-09-09T00:58:26.605-04:00 dnsDone=2025-09-09T00:58:26.605-04:00 connectDone=2025-09-09T00:58:26.619-04:00 gotConn=2025-09-09T00:58:26.619-04:00 responseStart=2025-09-09T00:58:26.645-04:00 tlsStart=0001-01-01T00:00:00.000Z tlsDone=0001-01-01T00:00:00.000Z end=0001-01-01T00:00:00.000Z
+    time=2025-09-09T00:58:26.800-04:00 level=DEBUG source=http.go:721 msg="Response timings for roundtrip" module=http_2xx target=prometheus.io roundtrip=1 start=2025-09-09T00:58:26.645-04:00 dnsDone=2025-09-09T00:58:26.646-04:00 connectDone=2025-09-09T00:58:26.656-04:00 gotConn=2025-09-09T00:58:26.717-04:00 responseStart=2025-09-09T00:58:26.765-04:00 tlsStart=2025-09-09T00:58:26.657-04:00 tlsDone=2025-09-09T00:58:26.717-04:00 end=2025-09-09T00:58:26.800-04:00
+    time=2025-09-09T00:58:26.801-04:00 level=DEBUG source=handler.go:127 msg="Probe succeeded" module=http_2xx target=prometheus.io duration_seconds=0.196876958
+    ```
+
+    **`?debug=true` probe output (truncated at metrics boundary):**
+
+    ```shell
+    ~ $ curl -sL "http://localhost:9115/probe?target=prometheus.io&module=http_2xx&debug=true" | sed '/Metrics that would have been returned/q'
+    Logs for the probe:
+    time=2025-09-09T00:58:26.604-04:00 level=DEBUG source=handler.go:116 msg="Beginning probe" module=http_2xx target=prometheus.io probe=http timeout_seconds=119.5
+    time=2025-09-09T00:58:26.604-04:00 level=DEBUG source=utils.go:61 msg="Resolving target address" module=http_2xx target=prometheus.io target=prometheus.io ip_protocol=ip4
+    time=2025-09-09T00:58:26.605-04:00 level=DEBUG source=utils.go:96 msg="Resolved target address" module=http_2xx target=prometheus.io target=prometheus.io ip=104.21.60.220
+    time=2025-09-09T00:58:26.605-04:00 level=DEBUG source=http.go:209 msg="Making HTTP request" module=http_2xx target=prometheus.io url=http://104.21.60.220 host=prometheus.io
+    time=2025-09-09T00:58:26.645-04:00 level=WARN source=http.go:490 msg="Received redirect" module=http_2xx target=prometheus.io location=https://prometheus.io/
+    time=2025-09-09T00:58:26.645-04:00 level=DEBUG source=http.go:209 msg="Making HTTP request" module=http_2xx target=prometheus.io url=https://prometheus.io/ host=""
+    time=2025-09-09T00:58:26.645-04:00 level=DEBUG source=http.go:224 msg="Address does not match first address, not sending TLS ServerName" module=http_2xx target=prometheus.io first=104.21.60.220 address=prometheus.io
+    time=2025-09-09T00:58:26.765-04:00 level=DEBUG source=http.go:590 msg="Received HTTP response" module=http_2xx target=prometheus.io status_code=200
+    time=2025-09-09T00:58:26.800-04:00 level=DEBUG source=http.go:721 msg="Response timings for roundtrip" module=http_2xx target=prometheus.io roundtrip=0 start=2025-09-09T00:58:26.605-04:00 dnsDone=2025-09-09T00:58:26.605-04:00 connectDone=2025-09-09T00:58:26.619-04:00 gotConn=2025-09-09T00:58:26.619-04:00 responseStart=2025-09-09T00:58:26.645-04:00 tlsStart=0001-01-01T00:00:00.000Z tlsDone=0001-01-01T00:00:00.000Z end=0001-01-01T00:00:00.000Z
+    time=2025-09-09T00:58:26.800-04:00 level=DEBUG source=http.go:721 msg="Response timings for roundtrip" module=http_2xx target=prometheus.io roundtrip=1 start=2025-09-09T00:58:26.645-04:00 dnsDone=2025-09-09T00:58:26.646-04:00 connectDone=2025-09-09T00:58:26.656-04:00 gotConn=2025-09-09T00:58:26.717-04:00 responseStart=2025-09-09T00:58:26.765-04:00 tlsStart=2025-09-09T00:58:26.657-04:00 tlsDone=2025-09-09T00:58:26.717-04:00 end=2025-09-09T00:58:26.800-04:00
+    time=2025-09-09T00:58:26.801-04:00 level=DEBUG source=handler.go:127 msg="Probe succeeded" module=http_2xx target=prometheus.io duration_seconds=0.196876958
+
+
+
+    Metrics that would have been returned:
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Probe logs always appear in the `?debug=true` output regardless of `--log.prober` level, because the scrape logger writes to an internal buffer independently of the stderr log level filter.
+</Note>

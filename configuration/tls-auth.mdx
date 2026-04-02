@@ -1,0 +1,84 @@
+---
+title: "TLS and authentication"
+description: "Secure the Blackbox Exporter's HTTP endpoints with TLS and basic authentication."
+---
+
+The Blackbox Exporter exposes several HTTP endpoints: `/probe`, `/metrics`, `/config`, and the web UI. You can protect all of them with TLS and basic authentication using the `--web.config.file` flag.
+
+<Note>
+  This page covers TLS and authentication for the **exporter's own HTTP server**. TLS used *within* probe connections (e.g., checking a target's certificate) is configured per-module in `blackbox.yml` under the `tls_config` block of each prober.
+</Note>
+
+## Enabling TLS and basic auth
+
+Pass a web configuration file to the exporter at startup:
+
+```bash
+./blackbox_exporter \
+  --config.file=blackbox.yml \
+  --web.config.file=web-config.yml
+```
+
+The web config file follows the [Prometheus exporter-toolkit format](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md).
+
+<Warning>
+  TLS and authentication settings in `--web.config.file` apply to **all** HTTP endpoints simultaneously — `/probe`, `/metrics`, `/config`, and the web UI. There is no per-endpoint granularity.
+</Warning>
+
+## Basic authentication
+
+To require a username and password for all requests, add a `basic_auth_users` map. Passwords must be stored as bcrypt hashes.
+
+```yaml web-config.yml
+basic_auth_users:
+  prometheus: $2y$10$EmWm7xFKCa6PZqMkDwrHuO8n0eFOb3mHc/M7UrSDkOCkYl1yREJjC
+  admin: $2y$10$hNABqJLn2NvxX3GOw4DlK.YT7X4a1kH4FPc6wJeajLaG0MEdXIFqm
+```
+
+Generate a bcrypt hash with `htpasswd` or any bcrypt utility:
+
+```bash
+htpasswd -nBC 10 prometheus
+```
+
+## TLS
+
+To serve all endpoints over HTTPS, provide a certificate and key:
+
+```yaml web-config.yml
+tls_server_config:
+  cert_file: /etc/blackbox_exporter/tls.crt
+  key_file: /etc/blackbox_exporter/tls.key
+```
+
+You can combine TLS and basic auth in a single file:
+
+```yaml web-config.yml
+tls_server_config:
+  cert_file: /etc/blackbox_exporter/tls.crt
+  key_file: /etc/blackbox_exporter/tls.key
+
+basic_auth_users:
+  prometheus: $2y$10$EmWm7xFKCa6PZqMkDwrHuO8n0eFOb3mHc/M7UrSDkOCkYl1yREJjC
+```
+
+<Tip>
+  When TLS is enabled, update your Prometheus `scrape_configs` to use `https://` and configure `tls_config` or `basic_auth` under the job's `relabel_configs` / `metrics_path` settings accordingly.
+</Tip>
+
+## Full web config reference
+
+The web config file supports all options defined in the exporter-toolkit documentation:
+
+- `tls_server_config` — TLS certificate, key, client CA, cipher suites, min/max TLS version
+- `http_server_config` — HTTP/2 toggle
+- `basic_auth_users` — map of username to bcrypt-hashed password
+
+See the upstream reference for the complete schema:
+[github.com/prometheus/exporter-toolkit — web-configuration.md](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md)
+
+## IPv6 and Docker
+
+<Note>
+  When running in Docker, the default listen address `:9115` binds to both IPv4 and IPv6. If your container host does not have IPv6 enabled, you may need to bind explicitly to `0.0.0.0:9115` using `--web.listen-address=0.0.0.0:9115` to avoid a bind error.
+</Note>

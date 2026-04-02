@@ -1,0 +1,81 @@
+---
+title: "Permissions"
+description: "Required system permissions for ICMP probing and Unix socket probing."
+---
+
+The ICMP probe requires elevated privileges to open raw sockets. The exact requirement depends on your operating system. HTTP, TCP, DNS, and gRPC probers do not require elevated privileges.
+
+## ICMP probe
+
+<Tabs>
+  <Tab title="Linux">
+    On Linux, one of the following is required:
+
+    **Option 1: ping group range**
+
+    The process user must belong to a group within the `net.ipv4.ping_group_range` sysctl range.
+
+    Check the current range:
+
+    ```bash
+    sysctl net.ipv4.ping_group_range
+    ```
+
+    To allow any user to send pings, set the range to cover all group IDs:
+
+    ```bash
+    net.ipv4.ping_group_range = 0 2147483647
+    ```
+
+    To make this permanent, add the line to `/etc/sysctl.conf`:
+
+    ```
+    net.ipv4.ping_group_range = 0 2147483647
+    ```
+
+    Your distribution may already configure this value in `/etc/sysctl.conf` or a file under `/etc/sysctl.d/`.
+
+    **Option 2: CAP_NET_RAW capability**
+
+    Grant the `CAP_NET_RAW` capability directly to the binary:
+
+    ```bash
+    setcap cap_net_raw+ep blackbox_exporter
+    ```
+
+    **Option 3: root**
+
+    Run the exporter as the root user.
+  </Tab>
+  <Tab title="Windows">
+    <Warning>
+      Administrator privileges are required to run ICMP probes on Windows.
+    </Warning>
+
+    Run the exporter from an elevated (Administrator) command prompt or service account with administrator rights.
+  </Tab>
+  <Tab title="BSD">
+    <Warning>
+      The root user is required to run ICMP probes on BSD systems.
+    </Warning>
+
+    Run the exporter as root or use `sudo`.
+  </Tab>
+  <Tab title="macOS">
+    No additional privileges are needed for ICMP probes on macOS.
+  </Tab>
+</Tabs>
+
+## Unix socket probe
+
+The process running the exporter must have:
+
+- **Write (`w`) permission** on the Unix socket file itself.
+- **Execute (`x`) permission** on every directory in the path leading to the socket.
+
+Verify permissions on the socket and its parent directories:
+
+```bash
+ls -la /path/to/socket
+ls -la /path/to/
+```
